@@ -18,6 +18,8 @@ import {Strategy as SoundCloudStrategy} from 'passport-soundcloud';
 import swig from 'swig';
 import Twitter from 'twitter';
 const MongoStore = require('connect-mongo')(session);
+import Provider from './lib/provider/Provider';
+import TwitterProvider from './lib/provider/TwitterProvider';
 
 const config = _.extend({}, process.env);
 
@@ -86,22 +88,7 @@ passport.use('local', new LocalStrategy(
   }
 ));
 
-passport.use('twitter', new TwitterStrategy({
-    consumerKey: config.TWITTER_CONSUMER_KEY,
-    consumerSecret: config.TWITTER_CONSUMER_SECRET,
-    callbackURL: config.SITE_ROOT + '/connect/twitter/callback'
-  },
-  function(token, tokenSecret, profile, done) {
-    const account = {
-      domain: 'twitter',
-      userId: profile.id,
-      token: token,
-      tokenSecret: tokenSecret,
-      profile: profile
-    };
-    done(null, account);
-  }
-));
+Provider.addStrategy(passport)(TwitterProvider);
 
 function registerConnectors(app, strategyName) {
   app.get('/connect/' + strategyName, passport.authorize(strategyName));
@@ -129,7 +116,7 @@ passport.use('soundcloud', new SoundCloudStrategy({
   }
 ));
 
-registerConnectors(app, 'twitter');
+Provider.addMiddleware(app, passport)(TwitterProvider);
 registerConnectors(app, 'soundcloud');
 
 function apiEndpoint(handlerP) {
@@ -188,17 +175,24 @@ app.post('/signup', apiEndpoint(req => {
 }));
 
 app.get('/', (req, res) => {
-  let twitterFeedP = Promise.resolve([]);
+  let itemsP = Promise.resolve([]);
   if (req.user) {
-    const apiClients = req.user.apiClients();
-    if (apiClients.twitter) {
-      twitterFeedP = apiClients.twitter
-        .getAsync('favorites/list');
-    }
+    const providerPromises = (req.user.accounts || []).map(account => {
+      const provider = Provider.getByDomain(account.domain);
+      if (provider) {
+        return provider.getItems(account);
+      } else {
+        return [];
+      }
+    });
+    itemsP = Promise.all(providerPromises).then(nestedItems => {
+      return _.flatten(nestedItems);
+    });
   }
-  twitterFeedP.then(twitterFeed => {
+
+  itemsP.then(items => {
     res.render('index', {
-      twitterFeed: twitterFeed
+      twitterFeed: items.map(item => item.props) // XXX rename arg
     });
   });
 });
