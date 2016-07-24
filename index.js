@@ -13,13 +13,12 @@ import _ from 'lodash';
 import passport from 'passport';
 import csurf from 'csurf';
 import {Strategy as LocalStrategy} from 'passport-local';
-import {Strategy as TwitterStrategy} from 'passport-twitter';
-import {Strategy as SoundCloudStrategy} from 'passport-soundcloud';
 import swig from 'swig';
 import Twitter from 'twitter';
 const MongoStore = require('connect-mongo')(session);
 import Provider from './lib/provider/Provider';
 import TwitterProvider from './lib/provider/TwitterProvider';
+import SoundCloudProvider from './lib/provider/SoundCloudProvider';
 
 const config = _.extend({}, process.env);
 
@@ -89,35 +88,10 @@ passport.use('local', new LocalStrategy(
 ));
 
 Provider.addStrategy(passport)(TwitterProvider);
-
-function registerConnectors(app, strategyName) {
-  app.get('/connect/' + strategyName, passport.authorize(strategyName));
-
-  app.get('/connect/' + strategyName + '/callback', passport.authorize(strategyName), (req, res) => {
-    req.user.addAccount(req.account);
-    req.user.saveAsync().then(() => res.redirect('/'));
-  });
-}
-
-passport.use('soundcloud', new SoundCloudStrategy({
-    clientID: config.SOUNDCLOUD_CLIENT_ID,
-    clientSecret: config.SOUNDCLOUD_CLIENT_SECRET,
-    callbackURL: config.SITE_ROOT + '/connect/soundcloud/callback'
-  },
-  function(token, tokenSecret, profile, done) {
-    const account = {
-      domain: 'soundcloud',
-      userId: profile.id,
-      token: token,
-      tokenSecret: tokenSecret,
-      profile: profile
-    };
-    done(null, account);
-  }
-));
+Provider.addStrategy(passport)(SoundCloudProvider);
 
 Provider.addMiddleware(app, passport)(TwitterProvider);
-registerConnectors(app, 'soundcloud');
+Provider.addMiddleware(app, passport)(SoundCloudProvider);
 
 function apiEndpoint(handlerP) {
   return (req, res) => {
@@ -192,7 +166,7 @@ app.get('/', (req, res) => {
 
   itemsP.then(items => {
     res.render('index', {
-      twitterFeed: items.map(item => item.props) // XXX rename arg
+      feed: items.map(item => item.json())
     });
   });
 });
